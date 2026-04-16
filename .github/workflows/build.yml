@@ -1,0 +1,44 @@
+name: SLSA Secure Build
+
+on:
+  push:
+    branches: [ "main" ]
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+  attestations: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Extract metadata
+        id: meta
+        run: |
+          IMAGE=ghcr.io/${{ github.repository }}/app
+          echo "image=$IMAGE" >> $GITHUB_OUTPUT
+
+      - name: Build image
+        id: build
+        run: |
+          docker build -t ${{ steps.meta.outputs.image }}:latest .
+          docker push ${{ steps.meta.outputs.image }}:latest
+
+          DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' ${{ steps.meta.outputs.image }}:latest | cut -d@ -f2)
+          echo "digest=$DIGEST" >> $GITHUB_OUTPUT
+
+      - name: Generate SLSA Provenance
+        uses: actions/attest@v4
+        with:
+          subject-name: ${{ steps.meta.outputs.image }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
